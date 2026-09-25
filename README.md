@@ -25,7 +25,7 @@ mkdir -p ~/.local/bin
 ln -sfn ~/.config/omarchy/plugins/ashis.devanagari/bin/devanagari ~/.local/bin/devanagari
 ```
 
-Omarchy already provides Tesseract, `grim`, `slurp`, and `hyprpicker`. No sudo, and no PyTorch.
+Omarchy already provides Tesseract, `grim`, `slurp`, and `hyprpicker`. Nothing here asks for a root password, and PyTorch is not used.
 
 ## Remove
 
