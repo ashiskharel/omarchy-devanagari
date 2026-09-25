@@ -41,3 +41,19 @@ def probe_path() -> Path:
 
 def samples_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "samples"
+
+
+def ensure_private(directory: Path) -> None:
+    """Create a cache directory only this user can search. An existing 0755 directory is tightened."""
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+
+
+def write_private(path: Path, text: str) -> None:
+    """Replace path with text that other local users cannot read."""
+    ensure_private(path.parent)
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(text, encoding="utf-8")
+    os.chmod(partial, 0o600)
+    os.replace(partial, path)
+    os.chmod(path, 0o600)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from devanagari.errors import OcrError
-from devanagari.paths import cache_dir, tessdata_dir
+from devanagari.paths import cache_dir, ensure_private, tessdata_dir
 from devanagari.store import save_last
 
 _IMAGE_CAP = 15_000_000
@@ -35,7 +35,7 @@ def read_capture() -> dict | None:
     """Freeze the screen, let the person pick a region, and read it. None if they cancel."""
     _require_tools("hyprpicker", "slurp", "grim")
     _require_tessdata()
-    cache_dir().mkdir(parents=True, mode=0o755, exist_ok=True)
+    ensure_private(cache_dir())
     image = cache_dir() / "capture.png"
     picker = subprocess.Popen(
         ["hyprpicker", "-r", "-z"],
@@ -69,6 +69,7 @@ def read_capture() -> dict | None:
                 picker.kill()
     if shot.returncode != 0 or not image.is_file():
         raise OcrError("Could not capture that region.")
+    os.chmod(image, 0o600)
     text = _read_image(image, "6")
     return _finish(text, "screen")
 

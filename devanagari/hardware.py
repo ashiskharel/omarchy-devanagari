@@ -303,7 +303,7 @@ def _cached_probe(model_path: Path) -> int | None:
 
 
 def _store_probe(model_path: Path, free_mb: int) -> None:
-    path = probe_path()
-    path.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    from devanagari.paths import write_private
+
     payload = {"path": str(model_path), "size": model_path.stat().st_size, "freeMb": free_mb}
-    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    write_private(probe_path(), json.dumps(payload) + "\n")

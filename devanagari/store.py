@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 
 from devanagari.catalog import card_bytes
 from devanagari.errors import OcrError
 from devanagari.net import download
-from devanagari.paths import cache_dir, config_file, last_path, model_dir, tessdata_dir
+from devanagari.paths import config_file, last_path, model_dir, tessdata_dir, write_private
 
 
 def support_url() -> str:
@@ -63,11 +62,7 @@ def fetch_model(card: dict) -> str:
 
 
 def save_last(record: dict) -> None:
-    cache_dir().mkdir(parents=True, mode=0o755, exist_ok=True)
-    path = last_path()
-    partial = path.with_name(path.name + ".partial")
-    partial.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(partial, path)
+    write_private(last_path(), json.dumps(record, ensure_ascii=False, indent=2) + "\n")
 
 
 def load_last() -> dict:

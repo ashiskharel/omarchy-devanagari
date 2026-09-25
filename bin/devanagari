@@ -6,6 +6,6 @@ script=$(readlink -f -- "$0")
 root=$(CDPATH= cd -- "$(dirname -- "$script")/.." && pwd)
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/omarchy-devanagari/pyc"
-mkdir -p "$PYTHONPYCACHEPREFIX"
+mkdir -p -m 700 "$PYTHONPYCACHEPREFIX"
 cd "$root"
 exec /usr/bin/python3 -m devanagari "$@"
