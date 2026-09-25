@@ -1,0 +1,13 @@
+[project]
+name = "omarchy-devanagari"
+version = "0.1.0"
+description = "Local Devanagari OCR for Omarchy, with a hardware check before any model download"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+devanagari = "devanagari.__main__:main"
+
+[tool.setuptools]
+packages = ["devanagari"]

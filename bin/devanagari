@@ -1,0 +1,11 @@
+#!/bin/sh
+# Devanagari OCR. Cache and bytecode stay outside the plugin directory,
+# because a write there reloads the shell and closes the panel.
+# ~/.local/bin/devanagari is a symlink. dirname of that path is not the project.
+script=$(readlink -f -- "$0")
+root=$(CDPATH= cd -- "$(dirname -- "$script")/.." && pwd)
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/omarchy-devanagari/pyc"
+mkdir -p "$PYTHONPYCACHEPREFIX"
+cd "$root"
+exec /usr/bin/python3 -m devanagari "$@"

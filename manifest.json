@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "ashis.devanagari",
+  "name": "Devanagari",
+  "version": "0.1.0",
+  "author": "Ashis K",
+  "description": "Nepali and Devanagari text from the screen or a file. A machine check decides what can be downloaded.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "Devanagari",
+    "description": "Local Devanagari OCR and a hardware check",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

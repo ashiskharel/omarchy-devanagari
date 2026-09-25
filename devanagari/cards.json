@@ -1,0 +1,57 @@
+{
+  "models": [
+    {
+      "id": "tesseract-nep",
+      "name": "Tesseract Nepali",
+      "kind": "tessdata",
+      "published": true,
+      "license": "Apache-2.0",
+      "source": "https://github.com/tesseract-ocr/tessdata",
+      "revision": "8e7c7ae5fa030ff24c36bd5c33be39fed1997efd",
+      "note": "The reader on this plugin. English and script detection come from the system tessdata.",
+      "files": [
+        {
+          "name": "nep.traineddata",
+          "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata/8e7c7ae5fa030ff24c36bd5c33be39fed1997efd/nep.traineddata",
+          "sha256": "c3146ef0259961d5a65339bdb91dccb51991acee3c8ae456e4cf750345051eb6",
+          "bytes": 2189424
+        }
+      ]
+    },
+    {
+      "id": "ppocr-devanagari",
+      "name": "PP-OCRv5 Devanagari",
+      "kind": "onnx-rec",
+      "published": true,
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/xberg-io/paddleocr-onnx-models",
+      "revision": "bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8",
+      "note": "Small quantized recognition weights for one line of Devanagari, including Nepali. Page reading stays on Tesseract. This plugin does not install an ONNX runtime.",
+      "files": [
+        {
+          "name": "model.onnx",
+          "url": "https://huggingface.co/xberg-io/paddleocr-onnx-models/resolve/bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8/rec/devanagari/model.onnx",
+          "sha256": "2e895a63a7e08932c8b7b65d8bdb87f96b6f075a80c329ab98298ea0915ebf85",
+          "bytes": 7935595
+        },
+        {
+          "name": "dict.txt",
+          "url": "https://huggingface.co/xberg-io/paddleocr-onnx-models/resolve/bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8/rec/devanagari/dict.txt",
+          "sha256": "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc",
+          "bytes": 1943
+        }
+      ]
+    },
+    {
+      "id": "ashis-nepali",
+      "name": "In-house Nepal print",
+      "kind": "onnx-rec",
+      "published": false,
+      "license": "",
+      "source": "",
+      "revision": "",
+      "note": "Not published. When a model trained on local Nepal pages is on Hugging Face, it becomes a card like the others, and the same machine check decides the download.",
+      "files": []
+    }
+  ]
+}
