@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import struct
 import tempfile
+import zlib
 from pathlib import Path
 
 from devanagari.errors import OcrError
@@ -33,8 +35,37 @@ def main() -> int:
     pdf = _text_pdf("Hello Nepal this page already has a text layer.")
     record = read_path(pdf, source="check")
     assert "Hello Nepal" in record["text"]
+
+    huge = _png_header(40_000, 40_000)
+    try:
+        read_path(huge, source="check")
+        raise AssertionError("a 40k by 40k PNG header must be refused")
+    except OcrError as exc:
+        assert "pixels" in str(exc)
+
+    unknown = Path(tempfile.NamedTemporaryFile(prefix="devanagari-", suffix=".png", delete=False).name)
+    unknown.write_bytes(b"not-an-image")
+    try:
+        read_path(unknown, source="check")
+        raise AssertionError("an image whose size cannot be read must be refused")
+    except OcrError as exc:
+        assert "size" in str(exc)
+
     print("checks ok")
     return 0
+
+
+def _png_header(width: int, height: int) -> Path:
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    body = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IEND", b"")
+    handle = tempfile.NamedTemporaryFile(prefix="devanagari-", suffix=".png", delete=False)
+    handle.write(body)
+    handle.close()
+    return Path(handle.name)
 
 
 def _text_pdf(words: str) -> Path:

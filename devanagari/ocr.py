@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import struct
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -150,25 +151,94 @@ def _read_image(path: Path, psm: str) -> str:
 
 
 def _reject_huge_bitmap(path: Path) -> None:
-    try:
-        result = subprocess.run(
-            ["magick", "identify", "-format", "%w %h", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    parts = result.stdout.split()
-    if len(parts) < 2:
-        return
-    try:
-        pixels = int(parts[0]) * int(parts[1])
-    except ValueError:
-        return
+    pixels = _header_pixels(path)
+    if pixels is None:
+        raise OcrError("Could not read the image size.")
     if pixels > _PIXEL_CAP:
         raise OcrError("The image has too many pixels for this machine.")
+
+
+def _header_pixels(path: Path) -> int | None:
+    """Width times height from the file header. The pixel data is not decoded."""
+    with path.open("rb") as handle:
+        head = handle.read(32)
+        if len(head) < 10:
+            return None
+        if head.startswith(b"\x89PNG\r\n\x1a\n"):
+            if len(head) < 24 or head[12:16] != b"IHDR":
+                return None
+            width, height = struct.unpack(">II", head[16:24])
+            return _pixels(width, height)
+        if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+            width, height = struct.unpack_from("<HH", head, 6)
+            return _pixels(width, height)
+        if head.startswith(b"BM") and len(head) >= 26:
+            width, height = struct.unpack_from("<ii", head, 18)
+            return _pixels(width, abs(height))
+        if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+            extra = handle.read(16)
+            return _webp_pixels(head + extra)
+        if head.startswith(b"\xff\xd8"):
+            rest = handle.read(_IMAGE_CAP)
+            return _jpeg_pixels(head + rest)
+    return None
+
+
+def _pixels(width: int, height: int) -> int | None:
+    if width <= 0 or height <= 0:
+        return None
+    return width * height
+
+
+def _webp_pixels(buf: bytes) -> int | None:
+    if len(buf) < 20:
+        return None
+    kind = buf[12:16]
+    if kind == b"VP8X" and len(buf) >= 30:
+        width = 1 + int.from_bytes(buf[24:27], "little")
+        height = 1 + int.from_bytes(buf[27:30], "little")
+        return _pixels(width, height)
+    if kind == b"VP8 " and len(buf) >= 30 and buf[23:26] == b"\x9d\x01\x2a":
+        width = int.from_bytes(buf[26:28], "little") & 0x3FFF
+        height = int.from_bytes(buf[28:30], "little") & 0x3FFF
+        return _pixels(width, height)
+    if kind == b"VP8L" and len(buf) >= 25 and buf[20] == 0x2F:
+        bits = int.from_bytes(buf[21:25], "little")
+        width = (bits & 0x3FFF) + 1
+        height = ((bits >> 14) & 0x3FFF) + 1
+        return _pixels(width, height)
+    return None
+
+
+def _jpeg_pixels(data: bytes) -> int | None:
+    i = 2
+    n = len(data)
+    while i + 1 < n:
+        if data[i] != 0xFF:
+            return None
+        while i < n and data[i] == 0xFF:
+            i += 1
+        if i >= n:
+            return None
+        marker = data[i]
+        i += 1
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            continue
+        if i + 2 > n:
+            return None
+        length = int.from_bytes(data[i : i + 2], "big")
+        if length < 2 or i + length > n:
+            return None
+        if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+            if length < 7:
+                return None
+            height = int.from_bytes(data[i + 3 : i + 5], "big")
+            width = int.from_bytes(data[i + 5 : i + 7], "big")
+            return _pixels(width, height)
+        if marker == 0xDA:
+            return None
+        i += length
+    return None
 
 
 def _run(command: list[str], timeout: int) -> str:
