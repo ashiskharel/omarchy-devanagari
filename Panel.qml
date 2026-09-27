@@ -84,6 +84,7 @@ Panel {
     root.busy = true
     root.reopenAfterCapture = true
     root.close()
+    captureDelay.spins = 0
     captureDelay.restart()
   }
 
@@ -121,8 +122,18 @@ Panel {
 
   Timer {
     id: captureDelay
-    interval: 250
-    onTriggered: root.run(["capture", "--json"])
+    interval: 40
+    repeat: true
+    property int spins: 0
+    onTriggered: {
+      // The overlay stays mapped while it fades. Start the drag only after
+      // that surface is gone, so the click is not swallowed.
+      spins += 1
+      if ((!panel.open && !panel.visible) || spins > 25) {
+        stop()
+        root.run(["capture", "--json"])
+      }
+    }
   }
 
   Component.onCompleted: refresh()

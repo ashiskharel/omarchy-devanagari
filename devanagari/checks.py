@@ -31,6 +31,10 @@ def main() -> int:
     assert not run
     run, why = judge_run(kind="onnx-rec", stored=True, runtime=True, free_after_load_mb=200)
     assert not run and "400" in why
+    from devanagari.ocr import _selection_too_small
+
+    assert _selection_too_small("10,10 2x2")
+    assert not _selection_too_small("10,10 240x40")
     assert character_error("नेपाल", "नेपाल") == 0
     assert character_error("नेपाल", "नेपा") < 0.3
 

@@ -33,45 +33,31 @@ def read_path(path: Path, *, source: str | None = None, psm: str = "3") -> dict:
 
 
 def read_capture() -> dict | None:
-    """Freeze the screen, let the person pick a region, and read it. None if they cancel."""
-    _require_tools("hyprpicker", "slurp", "grim")
+    """Let the person drag a box, then read it. None if they cancel."""
+    _require_tools("slurp", "grim")
     _require_tessdata()
     ensure_private(cache_dir())
     image = cache_dir() / "capture.png"
-    picker = subprocess.Popen(
-        ["hyprpicker", "-r", "-z"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
     try:
-        # The frozen frame has to be up before the region is chosen.
-        import time
-
-        time.sleep(0.1)
-        try:
-            selected = subprocess.run(["slurp"], capture_output=True, text=True, timeout=180, check=False)
-        except subprocess.TimeoutExpired as exc:
-            _remember("The region picker timed out before a region was chosen.")
-            raise OcrError("The region picker timed out before a region was chosen.") from exc
-        geometry = selected.stdout.strip()
-        if selected.returncode != 0 or not geometry:
-            detail = (selected.stderr or "").strip()
-            message = detail or "No region was selected."
-            _remember(message)
-            return None
-        shot = subprocess.run(
-            ["grim", "-g", geometry, str(image)],
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
-    finally:
-        if picker.poll() is None:
-            picker.terminate()
-            try:
-                picker.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                picker.kill()
+        selected = subprocess.run(["slurp"], capture_output=True, text=True, timeout=180, check=False)
+    except subprocess.TimeoutExpired as exc:
+        _remember("The region picker timed out before a box was dragged.")
+        raise OcrError("The region picker timed out before a box was dragged.") from exc
+    geometry = selected.stdout.strip()
+    if selected.returncode != 0 or not geometry:
+        detail = (selected.stderr or "").strip()
+        message = detail or "No region was selected."
+        _remember(message)
+        return None
+    if _selection_too_small(geometry):
+        _remember("Drag a box around the text. A click does not select a line.")
+        return None
+    shot = subprocess.run(
+        ["grim", "-g", geometry, str(image)],
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
     if shot.returncode != 0 or not image.is_file():
         detail = (shot.stderr or b"").decode("utf-8", "replace").strip()
         message = detail or "Could not capture that region."
@@ -90,6 +76,16 @@ def notify(headline: str, body: str = "") -> None:
         subprocess.run(command, capture_output=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return
+
+
+def _selection_too_small(geometry: str) -> bool:
+    """slurp prints 'x,y wxh'. A bare click is a speck, not a line of text."""
+    try:
+        _origin, size = geometry.split()
+        width, height = size.lower().split("x", 1)
+        return int(width) < 8 or int(height) < 8
+    except (ValueError, IndexError):
+        return False
 
 
 def _remember(message: str) -> None:
