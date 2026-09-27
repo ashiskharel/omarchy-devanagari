@@ -19,6 +19,7 @@ Panel {
   property string status: ""
   property bool busy: false
   property string mode: ""
+  property bool reopenAfterCapture: false
   readonly property var engines: report && report.engines ? report.engines : []
   readonly property var lastReading: report && report.last ? report.last : ({})
   readonly property string supportUrl: report && report.supportUrl ? report.supportUrl : ""
@@ -74,6 +75,18 @@ Panel {
     root.run(["status"])
   }
 
+  function beginCapture() {
+    // The panel is a full-screen overlay. While it is open it takes the
+    // pointer, so the region picker never sees the drag and waits until it
+    // gives up. Close first, then start the picker on the next beat.
+    if (tool.running) return
+    root.mode = "capture"
+    root.busy = true
+    root.reopenAfterCapture = true
+    root.close()
+    captureDelay.restart()
+  }
+
   function run(args) {
     if (tool.running) return
     root.mode = args[0]
@@ -106,6 +119,12 @@ Panel {
     return ""
   }
 
+  Timer {
+    id: captureDelay
+    interval: 250
+    onTriggered: root.run(["capture", "--json"])
+  }
+
   Component.onCompleted: refresh()
 
   Process {
@@ -125,12 +144,18 @@ Panel {
     }
     onExited: function(code) {
       root.busy = false
-      if (root.mode !== "status") {
-        if (code !== 0 && root.status === "") root.status = "That step did not finish"
-        root.run(["status"])
+      if (root.mode === "status") {
+        if (code !== 0 && root.status === "") root.status = "Machine check failed"
         return
       }
-      if (code !== 0 && root.status === "") root.status = "Machine check failed"
+      var reopen = root.reopenAfterCapture
+      root.reopenAfterCapture = false
+      var failed = code !== 0 && root.status === ""
+      Qt.callLater(function() {
+        if (reopen) root.open()
+        else root.run(["status"])
+        if (failed && root.status === "") root.status = "That step did not finish"
+      })
     }
   }
 
@@ -251,24 +276,6 @@ Panel {
             }
           }
 
-          Column {
-            width: parent.width - Style.space(8)
-            x: Style.space(4)
-            spacing: Style.space(6)
-            visible: (root.lastReading.text || "") !== "" || (root.lastReading.error || "") !== ""
-
-            Text {
-              text: root.lastLine()
-              width: parent.width
-              wrapMode: Text.WordWrap
-              color: root.ink
-              font.family: root.face
-              font.pixelSize: Style.font.body
-              maximumLineCount: 8
-              elide: Text.ElideRight
-            }
-          }
-
           Row {
             x: Style.space(4)
             spacing: Style.space(16)
@@ -284,7 +291,7 @@ Panel {
                 anchors.fill: parent
                 enabled: !root.busy
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.run(["capture", "--json"])
+                onClicked: root.beginCapture()
               }
             }
 
@@ -302,6 +309,24 @@ Panel {
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: root.run(["last", "--copy"])
               }
+            }
+          }
+
+          Column {
+            width: parent.width - Style.space(8)
+            x: Style.space(4)
+            spacing: Style.space(6)
+            visible: root.lastLine() !== ""
+
+            Text {
+              text: root.lastLine()
+              width: parent.width
+              wrapMode: Text.WordWrap
+              color: root.ink
+              font.family: root.face
+              font.pixelSize: Style.font.body
+              maximumLineCount: 8
+              elide: Text.ElideRight
             }
           }
 

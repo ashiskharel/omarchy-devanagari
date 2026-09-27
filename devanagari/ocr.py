@@ -51,9 +51,13 @@ def read_capture() -> dict | None:
         try:
             selected = subprocess.run(["slurp"], capture_output=True, text=True, timeout=180, check=False)
         except subprocess.TimeoutExpired as exc:
-            raise OcrError("The region picker timed out.") from exc
+            _remember("The region picker timed out before a region was chosen.")
+            raise OcrError("The region picker timed out before a region was chosen.") from exc
         geometry = selected.stdout.strip()
         if selected.returncode != 0 or not geometry:
+            detail = (selected.stderr or "").strip()
+            message = detail or "No region was selected."
+            _remember(message)
             return None
         shot = subprocess.run(
             ["grim", "-g", geometry, str(image)],
@@ -69,7 +73,10 @@ def read_capture() -> dict | None:
             except subprocess.TimeoutExpired:
                 picker.kill()
     if shot.returncode != 0 or not image.is_file():
-        raise OcrError("Could not capture that region.")
+        detail = (shot.stderr or b"").decode("utf-8", "replace").strip()
+        message = detail or "Could not capture that region."
+        _remember(message)
+        raise OcrError(message)
     os.chmod(image, 0o600)
     text = _read_image(image, "6")
     return _finish(text, "screen")
@@ -83,6 +90,16 @@ def notify(headline: str, body: str = "") -> None:
         subprocess.run(command, capture_output=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return
+
+
+def _remember(message: str) -> None:
+    save_last({
+        "text": "",
+        "engine": "tesseract-nep",
+        "source": "screen",
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "error": message,
+    })
 
 
 def _finish(text: str, source: str) -> dict:

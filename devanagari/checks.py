@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 import tempfile
 import zlib
@@ -14,6 +15,7 @@ from devanagari.score import character_error
 
 
 def main() -> int:
+    os.environ["XDG_CACHE_HOME"] = tempfile.mkdtemp(prefix="devanagari-check-")
     assert optional_need_mb(8 * 1024 * 1024) == 528
     allowed, _ = judge_download(1400, 2_189_424, kind="tessdata", published=True, force=False)
     assert allowed
