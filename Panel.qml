@@ -129,9 +129,15 @@ Panel {
       // The overlay stays mapped while it fades. Start the drag only after
       // that surface is gone, so the click is not swallowed.
       spins += 1
-      if ((!panel.open && !panel.visible) || spins > 25) {
+      if (!panel.open && !panel.visible) {
         stop()
         root.run(["capture", "--json"])
+      } else if (spins > 40) {
+        stop()
+        root.busy = false
+        root.reopenAfterCapture = false
+        root.status = "The panel stayed on screen, so the crosshair could not start."
+        root.open()
       }
     }
   }

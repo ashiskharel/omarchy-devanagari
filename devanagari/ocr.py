@@ -6,6 +6,7 @@ import os
 import struct
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,11 +39,21 @@ def read_capture() -> dict | None:
     _require_tessdata()
     ensure_private(cache_dir())
     image = cache_dir() / "capture.png"
+    if not _wait_for_panel_to_close():
+        _remember("The panel was still covering the screen, so the crosshair could not show.")
+        return None
+    notify("Drag a box around the text", "It works over a terminal, a browser, or a document.")
     try:
-        selected = subprocess.run(["slurp"], capture_output=True, text=True, timeout=180, check=False)
+        selected = subprocess.run(
+            ["slurp", "-b", "00000099", "-c", "ffffffff", "-w", "2"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
     except subprocess.TimeoutExpired as exc:
-        _remember("The region picker timed out before a box was dragged.")
-        raise OcrError("The region picker timed out before a box was dragged.") from exc
+        _remember("The crosshair waited, and no box was dragged.")
+        raise OcrError("The crosshair waited, and no box was dragged.") from exc
     geometry = selected.stdout.strip()
     if selected.returncode != 0 or not geometry:
         detail = (selected.stderr or "").strip()
@@ -76,6 +87,33 @@ def notify(headline: str, body: str = "") -> None:
         subprocess.run(command, capture_output=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return
+
+
+def _wait_for_panel_to_close() -> bool:
+    """The plugin panel is a full-screen overlay. slurp cannot show through it."""
+    for _ in range(40):
+        if "omarchy-keyboard-panel" not in _layer_text():
+            return True
+        time.sleep(0.05)
+    subprocess.run(
+        ["omarchy-shell", "ashis.devanagari", "close"],
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    for _ in range(20):
+        if "omarchy-keyboard-panel" not in _layer_text():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _layer_text() -> str:
+    try:
+        result = subprocess.run(["hyprctl", "layers"], capture_output=True, text=True, timeout=2, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout
 
 
 def _selection_too_small(geometry: str) -> bool:
