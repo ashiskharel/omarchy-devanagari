@@ -11,7 +11,7 @@ from devanagari.catalog import find_card, load_cards
 from devanagari.errors import OcrError
 from devanagari.gate import judge_download
 from devanagari.hardware import format_report, memory_mb, report
-from devanagari.ocr import notify, read_capture, read_path
+from devanagari.ocr import notify, read_capture, read_geometry, read_path
 from devanagari.score import evaluate, format_rows
 from devanagari.store import copy_text, fetch_model, load_last
 
@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     read.add_argument("--psm", default="3")
 
     capture = sub.add_parser("capture", help="read a region of the screen")
+    capture.add_argument("--geometry", help="box already chosen, as 'x,y wxh'")
     capture.add_argument("--json", action="store_true")
     capture.add_argument("--no-copy", action="store_true")
 
@@ -79,7 +80,7 @@ def _run(args: argparse.Namespace) -> int:
         record = read_path(args.path, psm=args.psm)
         return _emit(record, as_json=args.json, copy=args.copy, notify_user=False)
     if args.command == "capture":
-        record = read_capture()
+        record = read_geometry(args.geometry) if args.geometry else read_capture()
         if record is None:
             print("Selection cancelled.")
             return 0

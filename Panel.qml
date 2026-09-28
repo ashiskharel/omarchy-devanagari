@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
@@ -20,6 +21,12 @@ Panel {
   property bool busy: false
   property string mode: ""
   property bool reopenAfterCapture: false
+  property bool capturing: false
+  property bool dragging: false
+  property real dragX: 0
+  property real dragY: 0
+  property real dragW: 0
+  property real dragH: 0
   readonly property var engines: report && report.engines ? report.engines : []
   readonly property var lastReading: report && report.last ? report.last : ({})
   readonly property string supportUrl: report && report.supportUrl ? report.supportUrl : ""
@@ -76,16 +83,48 @@ Panel {
   }
 
   function beginCapture() {
-    // The panel is a full-screen overlay. While it is open it takes the
-    // pointer, so the region picker never sees the drag and waits until it
-    // gives up. Close first, then start the picker on the next beat.
-    if (tool.running) return
+    // The dim is this plugin's own front layer. A separate picker was ending
+    // up behind the notification and the panel, so the screen never darkened.
+    if (tool.running || root.capturing) return
     root.mode = "capture"
     root.busy = true
+    root.dragging = false
     root.reopenAfterCapture = true
     root.close()
-    captureDelay.spins = 0
-    captureDelay.restart()
+    root.capturing = true
+  }
+
+  function cancelCapture() {
+    root.capturing = false
+    root.dragging = false
+    root.busy = false
+    root.reopenAfterCapture = false
+    root.status = "No region was selected."
+    root.open()
+  }
+
+  function finishDrag(mouse) {
+    var x = Math.min(root.dragX, mouse.x)
+    var y = Math.min(root.dragY, mouse.y)
+    var w = Math.abs(mouse.x - root.dragX)
+    var h = Math.abs(mouse.y - root.dragY)
+    root.capturing = false
+    root.dragging = false
+    if (w < 8 || h < 8) {
+      root.busy = false
+      root.reopenAfterCapture = false
+      root.status = "Drag a box around the text. A click does not select a line."
+      root.open()
+      return
+    }
+    var scale = captureOverlay.screen && captureOverlay.screen.devicePixelRatio ? captureOverlay.screen.devicePixelRatio : 1
+    var originX = captureOverlay.screen && captureOverlay.screen.x ? captureOverlay.screen.x : 0
+    var originY = captureOverlay.screen && captureOverlay.screen.y ? captureOverlay.screen.y : 0
+    var gx = Math.round(originX + x * scale)
+    var gy = Math.round(originY + y * scale)
+    var gw = Math.round(w * scale)
+    var gh = Math.round(h * scale)
+    root.run(["capture", "--geometry", gx + "," + gy + " " + gw + "x" + gh, "--json"])
   }
 
   function run(args) {
@@ -118,28 +157,6 @@ Panel {
     if (reading.error) return String(reading.error)
     if (reading.text) return String(reading.text)
     return ""
-  }
-
-  Timer {
-    id: captureDelay
-    interval: 40
-    repeat: true
-    property int spins: 0
-    onTriggered: {
-      // The overlay stays mapped while it fades. Start the drag only after
-      // that surface is gone, so the click is not swallowed.
-      spins += 1
-      if (!panel.open && !panel.visible) {
-        stop()
-        root.run(["capture", "--json"])
-      } else if (spins > 40) {
-        stop()
-        root.busy = false
-        root.reopenAfterCapture = false
-        root.status = "The panel stayed on screen, so the crosshair could not start."
-        root.open()
-      }
-    }
   }
 
   Component.onCompleted: refresh()
@@ -366,6 +383,72 @@ Panel {
             }
           }
         }
+      }
+    }
+  }
+
+  PanelWindow {
+    id: captureOverlay
+    visible: root.capturing
+    screen: panel.screen
+    color: Qt.rgba(0, 0, 0, 0.55)
+    exclusionMode: ExclusionMode.Ignore
+
+    WlrLayershell.namespace: "omarchy-devanagari-capture"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+    anchors {
+      top: true
+      bottom: true
+      left: true
+      right: true
+    }
+
+    Text {
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: 40
+      text: "Drag a box around the text. Escape cancels."
+      color: "white"
+      font.pixelSize: 16
+    }
+
+    Rectangle {
+      visible: root.dragging
+      x: Math.min(root.dragX, root.dragX + root.dragW)
+      y: Math.min(root.dragY, root.dragY + root.dragH)
+      width: Math.abs(root.dragW)
+      height: Math.abs(root.dragH)
+      color: Qt.rgba(1, 1, 1, 0.18)
+      border.color: "white"
+      border.width: 2
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      cursorShape: Qt.CrossCursor
+      focus: true
+      Keys.onEscapePressed: root.cancelCapture()
+      onPressed: function(mouse) {
+        if (mouse.button === Qt.RightButton) {
+          root.cancelCapture()
+          return
+        }
+        root.dragging = true
+        root.dragX = mouse.x
+        root.dragY = mouse.y
+        root.dragW = 0
+        root.dragH = 0
+      }
+      onPositionChanged: function(mouse) {
+        if (!root.dragging) return
+        root.dragW = mouse.x - root.dragX
+        root.dragH = mouse.y - root.dragY
+      }
+      onReleased: function(mouse) {
+        if (!root.dragging) return
+        root.finishDrag(mouse)
       }
     }
   }

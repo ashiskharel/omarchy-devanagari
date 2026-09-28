@@ -42,10 +42,9 @@ def read_capture() -> dict | None:
     if not _wait_for_panel_to_close():
         _remember("The panel was still covering the screen, so the crosshair could not show.")
         return None
-    notify("Drag a box around the text", "It works over a terminal, a browser, or a document.")
     try:
         selected = subprocess.run(
-            ["slurp", "-b", "00000099", "-c", "ffffffff", "-w", "2"],
+            ["slurp", "-b", "#00000099", "-c", "#ffffffff", "-w", "2"],
             capture_output=True,
             text=True,
             timeout=180,
@@ -60,9 +59,22 @@ def read_capture() -> dict | None:
         message = detail or "No region was selected."
         _remember(message)
         return None
+    return _read_geometry(geometry, image)
+
+
+def read_geometry(geometry: str) -> dict:
+    """Read a box the panel already measured. geometry is 'x,y wxh'."""
+    _require_tools("grim")
+    _require_tessdata()
+    ensure_private(cache_dir())
     if _selection_too_small(geometry):
-        _remember("Drag a box around the text. A click does not select a line.")
-        return None
+        message = "Drag a box around the text. A click does not select a line."
+        _remember(message)
+        raise OcrError(message)
+    return _read_geometry(geometry, cache_dir() / "capture.png")
+
+
+def _read_geometry(geometry: str, image: Path) -> dict:
     shot = subprocess.run(
         ["grim", "-g", geometry, str(image)],
         capture_output=True,
