@@ -34,32 +34,44 @@ def read_path(path: Path, *, source: str | None = None, psm: str = "3") -> dict:
 
 
 def read_capture() -> dict | None:
-    """Let the person drag a box, then read it. None if they cancel."""
-    _require_tools("slurp", "grim")
+    """Use Omarchy's region picker, then read the box. None if they cancel.
+
+    That picker is the one that gets in front of the shell. It freezes the
+    screen and, on this Intel GPU, temporarily forces a hardware cursor.
+    A plugin-owned layer stays behind the bar, the panel, and notifications,
+    and a software cursor never changes to a crosshair.
+    """
+    _require_tools("omarchy-capture-region", "grim")
     _require_tessdata()
     ensure_private(cache_dir())
-    image = cache_dir() / "capture.png"
     if not _wait_for_panel_to_close():
-        _remember("The panel was still covering the screen, so the crosshair could not show.")
+        _remember("The panel was still covering the screen.")
         return None
+    # omarchy-capture-screenshot treats a running slurp as "cancel".
+    # Clear a leftover picker so this one can map.
+    subprocess.run(["pkill", "-x", "slurp"], capture_output=True, check=False)
+    subprocess.run(["pkill", "-x", "hyprpicker"], capture_output=True, check=False)
+    time.sleep(0.05)
     try:
         selected = subprocess.run(
-            ["slurp", "-b", "#00000099", "-c", "#ffffffff", "-w", "2"],
+            ["omarchy-capture-region", "region"],
             capture_output=True,
             text=True,
             timeout=180,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        _remember("The crosshair waited, and no box was dragged.")
-        raise OcrError("The crosshair waited, and no box was dragged.") from exc
-    geometry = selected.stdout.strip()
+        _remember("The region picker timed out before a box was dragged.")
+        raise OcrError("The region picker timed out before a box was dragged.") from exc
+    geometry = ""
+    for line in selected.stdout.splitlines():
+        line = line.strip()
+        if line:
+            geometry = line
     if selected.returncode != 0 or not geometry:
-        detail = (selected.stderr or "").strip()
-        message = detail or "No region was selected."
-        _remember(message)
+        _remember("No region was selected.")
         return None
-    return _read_geometry(geometry, image)
+    return _read_geometry(geometry, cache_dir() / "capture.png")
 
 
 def read_geometry(geometry: str) -> dict:
