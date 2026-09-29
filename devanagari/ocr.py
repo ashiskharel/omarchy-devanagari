@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import os
+import re
 import struct
 import subprocess
 import tempfile
@@ -18,6 +20,7 @@ _IMAGE_CAP = 15_000_000
 _PDF_CAP = 8_000_000
 _PIXEL_CAP = 12_000_000
 _TEXT_ENOUGH = 40
+_PDF_DPI = 150
 
 
 def read_path(path: Path, *, source: str | None = None, psm: str = "3") -> dict:
@@ -47,10 +50,11 @@ def read_capture() -> dict | None:
     if not _wait_for_panel_to_close():
         _remember("The panel was still covering the screen.")
         return None
-    # omarchy-capture-screenshot treats a running slurp as "cancel".
-    # Clear a leftover picker so this one can map.
-    subprocess.run(["pkill", "-x", "slurp"], capture_output=True, check=False)
-    subprocess.run(["pkill", "-x", "hyprpicker"], capture_output=True, check=False)
+    # A running slurp makes the screenshot path treat the pick as cancel.
+    # Leave it alone: this plugin did not start that picker.
+    if _foreign_picker():
+        _remember("A region picker is already open. This command leaves it running.")
+        return None
     time.sleep(0.05)
     try:
         selected = subprocess.run(
@@ -183,6 +187,7 @@ def _read_pdf(path: Path) -> str:
     text = _run(["pdftotext", "-q", "-f", "1", "-l", "2", str(path), "-"], timeout=20)
     if len(text.strip()) >= _TEXT_ENOUGH:
         return text
+    _refuse_huge_pdf_page(path)
     _require_tessdata()
     with tempfile.TemporaryDirectory(prefix="devanagari-") as folder:
         stem = str(Path(folder) / "page")
@@ -314,6 +319,55 @@ def _jpeg_pixels(data: bytes) -> int | None:
             return None
         i += length
     return None
+
+
+def _foreign_picker() -> str | None:
+    """Name of a slurp or hyprpicker this command did not start, if one is running."""
+    for name in ("slurp", "hyprpicker"):
+        try:
+            found = subprocess.run(
+                ["pgrep", "-x", name],
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        if found.returncode == 0:
+            return name
+    return None
+
+
+def _refuse_huge_pdf_page(path: Path) -> None:
+    """Refuse page 1 before pdftoppm. The 8 MB file cap does not bound the bitmap."""
+    pixels = _pdf_page_pixels(path)
+    if pixels > _PIXEL_CAP:
+        raise OcrError("The PDF page has too many pixels for this machine.")
+
+
+def _pdf_page_pixels(path: Path) -> int:
+    try:
+        result = subprocess.run(
+            ["pdfinfo", "-f", "1", "-l", "1", str(path)],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise OcrError("Could not read the PDF page size.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise OcrError("Could not read the PDF page size.") from exc
+    text = result.stdout.decode("utf-8", "replace")
+    match = re.search(r"size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts", text)
+    if result.returncode != 0 or match is None:
+        raise OcrError("Could not read the PDF page size.")
+    width = float(match.group(1))
+    height = float(match.group(2))
+    if width <= 0 or height <= 0:
+        raise OcrError("Could not read the PDF page size.")
+    across = math.ceil(width * _PDF_DPI / 72)
+    down = math.ceil(height * _PDF_DPI / 72)
+    return across * down
 
 
 def _run(command: list[str], timeout: int) -> str:

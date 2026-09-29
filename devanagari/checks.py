@@ -57,8 +57,86 @@ def main() -> int:
     except OcrError as exc:
         assert "size" in str(exc)
 
+    _assert_pdf_bounds()
+    _assert_capture_leaves_other_pickers()
+
     print("checks ok")
     return 0
+
+
+def _assert_pdf_bounds() -> None:
+    import devanagari.ocr as ocr
+
+    huge = _text_pdf("Hi", width=2000, height=2000)
+    calls: list[str] = []
+    real_run = ocr.subprocess.run
+
+    def spy(command, **kwargs):
+        calls.append(command[0])
+        return real_run(command, **kwargs)
+
+    ocr.subprocess.run = spy
+    try:
+        read_path(huge, source="check")
+        raise AssertionError("a 2000pt page must be refused before rendering")
+    except OcrError as exc:
+        assert "pixels" in str(exc)
+    finally:
+        ocr.subprocess.run = real_run
+    assert "pdftoppm" not in calls
+    assert "pdfinfo" in calls
+
+    blank = Path(tempfile.NamedTemporaryFile(prefix="devanagari-", suffix=".pdf", delete=False).name)
+    blank.write_bytes(b"%PDF-1.4\nnot a page\n")
+    calls.clear()
+    ocr.subprocess.run = spy
+    try:
+        read_path(blank, source="check")
+        raise AssertionError("a PDF whose page size cannot be read must be refused")
+    except OcrError as exc:
+        assert "page size" in str(exc)
+    finally:
+        ocr.subprocess.run = real_run
+    assert "pdftoppm" not in calls
+
+    small = _text_pdf("Hi", width=300, height=100)
+    assert ocr._pdf_page_pixels(small) <= ocr._PIXEL_CAP
+
+
+def _assert_capture_leaves_other_pickers() -> None:
+    import devanagari.ocr as ocr
+
+    assert "pkill" not in Path(ocr.__file__).read_text()
+    real_run = ocr.subprocess.run
+    commands: list[list[str]] = []
+
+    def spy(command, **kwargs):
+        commands.append(list(command))
+        class Result:
+            returncode = 0 if command[:2] == ["pgrep", "-x"] and command[2] == "slurp" else 1
+            stdout = b"99\n" if returncode == 0 else b""
+            stderr = b""
+        return Result()
+
+    ocr.subprocess.run = spy
+    real_tools = ocr._require_tools
+    real_tess = ocr._require_tessdata
+    real_private = ocr.ensure_private
+    real_wait = ocr._wait_for_panel_to_close
+    ocr._require_tools = lambda *_names: None
+    ocr._require_tessdata = lambda: None
+    ocr.ensure_private = lambda _path: None
+    ocr._wait_for_panel_to_close = lambda: True
+    try:
+        assert ocr.read_capture() is None
+    finally:
+        ocr.subprocess.run = real_run
+        ocr._require_tools = real_tools
+        ocr._require_tessdata = real_tess
+        ocr.ensure_private = real_private
+        ocr._wait_for_panel_to_close = real_wait
+    assert all(command[0] != "pkill" for command in commands)
+    assert ["pgrep", "-x", "slurp"] in commands
 
 
 def _png_header(width: int, height: int) -> Path:
@@ -74,12 +152,12 @@ def _png_header(width: int, height: int) -> Path:
     return Path(handle.name)
 
 
-def _text_pdf(words: str) -> Path:
+def _text_pdf(words: str, width: int = 300, height: int = 100) -> Path:
     stream = f"BT /F1 12 Tf 20 50 Td ({words}) Tj ET".encode("ascii")
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".encode("ascii"),
         b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
