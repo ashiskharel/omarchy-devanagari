@@ -58,6 +58,7 @@ def main() -> int:
         assert "size" in str(exc)
 
     _assert_pdf_bounds()
+    _assert_pdftotext_is_capped()
     _assert_capture_leaves_other_pickers()
 
     print("checks ok")
@@ -101,6 +102,30 @@ def _assert_pdf_bounds() -> None:
 
     small = _text_pdf("Hi", width=300, height=100)
     assert ocr._pdf_page_pixels(small) <= ocr._PIXEL_CAP
+
+
+def _assert_pdftotext_is_capped() -> None:
+    import sys
+    import time
+
+    import devanagari.ocr as ocr
+
+    script = (
+        "import sys, time; "
+        "sys.stdout.buffer.write(b'x' * 2000000); "
+        "sys.stdout.buffer.flush(); "
+        "time.sleep(30)"
+    )
+    started = time.monotonic()
+    text = ocr._read_capped(
+        [sys.executable, "-c", script],
+        timeout=10,
+        limit=ocr._TEXT_CAP,
+    )
+    elapsed = time.monotonic() - started
+    assert elapsed < 8, elapsed
+    assert len(text.encode("utf-8")) <= ocr._TEXT_CAP
+    assert len(text) == ocr._TEXT_CAP
 
 
 def _assert_capture_leaves_other_pickers() -> None:

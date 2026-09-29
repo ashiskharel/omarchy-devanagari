@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import select
 import struct
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ _IMAGE_CAP = 15_000_000
 _PDF_CAP = 8_000_000
 _PIXEL_CAP = 12_000_000
 _TEXT_ENOUGH = 40
+_TEXT_CAP = 200_000
 _PDF_DPI = 150
 
 
@@ -166,8 +168,8 @@ def _remember(message: str) -> None:
 
 def _finish(text: str, source: str) -> dict:
     cleaned = text.strip()
-    if len(cleaned) > 200_000:
-        cleaned = cleaned[:200_000]
+    if len(cleaned) > _TEXT_CAP:
+        cleaned = cleaned[:_TEXT_CAP]
     record = {
         "text": cleaned,
         "engine": "tesseract-nep",
@@ -184,7 +186,11 @@ def _finish(text: str, source: str) -> dict:
 def _read_pdf(path: Path) -> str:
     if path.stat().st_size > _PDF_CAP:
         raise OcrError("The PDF is larger than 8 MB.")
-    text = _run(["pdftotext", "-q", "-f", "1", "-l", "2", str(path), "-"], timeout=20)
+    text = _read_capped(
+        ["pdftotext", "-q", "-f", "1", "-l", "2", str(path), "-"],
+        timeout=20,
+        limit=_TEXT_CAP,
+    )
     if len(text.strip()) >= _TEXT_ENOUGH:
         return text
     _refuse_huge_pdf_page(path)
@@ -368,6 +374,54 @@ def _pdf_page_pixels(path: Path) -> int:
     across = math.ceil(width * _PDF_DPI / 72)
     down = math.ceil(height * _PDF_DPI / 72)
     return across * down
+
+
+def _read_capped(command: list[str], timeout: int, limit: int) -> str:
+    """Read at most `limit` bytes. Stop and reap the process if it writes more."""
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise OcrError(f"{command[0]} is not installed.") from exc
+    data = bytearray()
+    deadline = time.monotonic() + timeout
+    assert proc.stdout is not None
+    try:
+        while len(data) < limit:
+            if time.monotonic() >= deadline:
+                raise OcrError(f"{command[0]} took too long.")
+            wait = min(0.2, max(0.0, deadline - time.monotonic()))
+            ready, _, _ = select.select([proc.stdout], [], [], wait)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                continue
+            chunk = os.read(proc.stdout.fileno(), min(65536, limit - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+    finally:
+        _reap(proc)
+    return bytes(data).decode("utf-8", "replace")
+
+
+def _reap(proc: subprocess.Popen[bytes]) -> None:
+    if proc.stdout is not None and not proc.stdout.closed:
+        proc.stdout.close()
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=1)
 
 
 def _run(command: list[str], timeout: int) -> str:
