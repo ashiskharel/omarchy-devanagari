@@ -6,6 +6,7 @@ import math
 import os
 import re
 import select
+import stat
 import struct
 import subprocess
 import tempfile
@@ -93,17 +94,31 @@ def read_geometry(geometry: str) -> dict:
 
 
 def _read_geometry(geometry: str, image: Path) -> dict:
-    shot = subprocess.run(
-        ["grim", "-g", geometry, str(image)],
-        capture_output=True,
-        timeout=15,
-        check=False,
-    )
-    if shot.returncode != 0 or not image.is_file():
-        detail = (shot.stderr or b"").decode("utf-8", "replace").strip()
-        message = detail or "Could not capture that region."
-        _remember(message)
-        raise OcrError(message)
+    ensure_private(image.parent)
+    fd, name = tempfile.mkstemp(prefix=".capture.", suffix=".png", dir=image.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        os.chmod(temporary, 0o600)
+        shot = subprocess.run(
+            ["grim", "-g", geometry, str(temporary)],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        written = temporary.is_file() and not temporary.is_symlink()
+        if shot.returncode != 0 or not written:
+            detail = (shot.stderr or b"").decode("utf-8", "replace").strip()
+            message = detail or "Could not capture that region."
+            _remember(message)
+            raise OcrError(message)
+        os.replace(temporary, image)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    info = image.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise OcrError("The capture file is not a regular file.")
     os.chmod(image, 0o600)
     text = _read_image(image, "6")
     return _finish(text, "screen")

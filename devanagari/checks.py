@@ -60,6 +60,7 @@ def main() -> int:
     _assert_pdf_bounds()
     _assert_pdftotext_is_capped()
     _assert_capture_leaves_other_pickers()
+    _assert_writes_do_not_follow_symlinks()
 
     print("checks ok")
     return 0
@@ -162,6 +163,115 @@ def _assert_capture_leaves_other_pickers() -> None:
         ocr._wait_for_panel_to_close = real_wait
     assert all(command[0] != "pkill" for command in commands)
     assert ["pgrep", "-x", "slurp"] in commands
+
+
+def _assert_writes_do_not_follow_symlinks() -> None:
+    import hashlib
+    import stat
+
+    import devanagari.net as net
+    import devanagari.ocr as ocr
+    from devanagari.paths import write_private
+
+    root = Path(tempfile.mkdtemp(prefix="devanagari-link-"))
+    canary = root / "canary"
+    canary.write_bytes(b"secret")
+    canary.chmod(0o644)
+    folder = root / "cache"
+    folder.mkdir(mode=0o700)
+    planted = folder / "last.json.partial"
+    planted.symlink_to(canary)
+    target = folder / "last.json"
+    target.symlink_to(canary)
+
+    write_private(target, "kept\n")
+
+    assert canary.read_bytes() == b"secret"
+    assert stat.S_IMODE(canary.stat().st_mode) == 0o644
+    assert planted.is_symlink()
+    assert not target.is_symlink()
+    assert target.read_text(encoding="utf-8") == "kept\n"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    outside = root / "outside"
+    outside.mkdir(mode=0o700)
+    nested = root / "via-link"
+    nested.symlink_to(outside)
+    try:
+        write_private(nested / "note.json", "nope")
+        raise AssertionError("a symlinked directory must be refused")
+    except OcrError as exc:
+        assert "directory" in str(exc)
+    assert not (outside / "note.json").exists()
+
+    image = folder / "capture.png"
+    image.symlink_to(canary)
+    real_run = ocr.subprocess.run
+    real_read = ocr._read_image
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"png-bytes")
+        class Result:
+            returncode = 0
+            stderr = b""
+        return Result()
+
+    ocr.subprocess.run = fake_run
+    ocr._read_image = lambda path, psm: "ok"
+    try:
+        record = ocr._read_geometry("10,10 40x20", image)
+    finally:
+        ocr.subprocess.run = real_run
+        ocr._read_image = real_read
+    assert record["text"] == "ok"
+    assert canary.read_bytes() == b"secret"
+    assert stat.S_IMODE(canary.stat().st_mode) == 0o644
+    assert not image.is_symlink()
+    assert image.read_bytes() == b"png-bytes"
+    assert stat.S_IMODE(image.stat().st_mode) == 0o600
+
+    body = b"model-bytes"
+    dest = folder / "model.onnx"
+    partial = folder / "model.onnx.partial"
+    partial.symlink_to(canary)
+    dest.symlink_to(canary)
+
+    class Body:
+        def __init__(self):
+            self.headers = {"Content-Length": str(len(body))}
+            self.offset = 0
+
+        def read(self, size):
+            chunk = body[self.offset : self.offset + size]
+            self.offset += len(chunk)
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class Opener:
+        def open(self, request, timeout):
+            return Body()
+
+    real_opener = net.urllib.request.build_opener
+    net.urllib.request.build_opener = lambda *args, **kwargs: Opener()
+    try:
+        net.download(
+            "https://example.invalid/model.onnx",
+            dest,
+            hashlib.sha256(body).hexdigest(),
+            cap=len(body),
+        )
+    finally:
+        net.urllib.request.build_opener = real_opener
+    assert canary.read_bytes() == b"secret"
+    assert partial.is_symlink()
+    assert not dest.is_symlink()
+    assert dest.read_bytes() == body
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
 
 
 def _png_header(width: int, height: int) -> Path:

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from devanagari.errors import OcrError
+from devanagari.paths import _replace_exclusive, ensure_private
 
 
 class _HttpsOnly(urllib.request.HTTPRedirectHandler):
@@ -22,24 +22,24 @@ def download(url: str, dest: Path, sha256: str, cap: int, timeout: int = 90) -> 
     """Save url to dest. Refuse a body larger than cap, then check sha256."""
     if not url.startswith("https://"):
         raise OcrError("Downloads use https only.")
-    dest.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
-    partial = dest.with_name(dest.name + ".partial")
-    opener = urllib.request.build_opener(_HttpsOnly)
-    request = urllib.request.Request(url, headers={"User-Agent": "omarchy-devanagari"})
-    try:
-        with opener.open(request, timeout=timeout) as response:
-            declared = response.headers.get("Content-Length")
-            if declared:
-                try:
-                    size = int(declared)
-                except ValueError:
-                    size = None
-                else:
-                    if size > cap:
-                        raise OcrError(f"The file says it is {size} bytes, over the {cap} byte cap.")
-            digest = hashlib.sha256()
-            got = 0
-            with partial.open("wb") as handle:
+    ensure_private(dest.parent)
+    digest = hashlib.sha256()
+
+    def produce(handle) -> None:
+        opener = urllib.request.build_opener(_HttpsOnly)
+        request = urllib.request.Request(url, headers={"User-Agent": "omarchy-devanagari"})
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                declared = response.headers.get("Content-Length")
+                if declared:
+                    try:
+                        size = int(declared)
+                    except ValueError:
+                        size = None
+                    else:
+                        if size > cap:
+                            raise OcrError(f"The file says it is {size} bytes, over the {cap} byte cap.")
+                got = 0
                 while True:
                     block = response.read(64 * 1024)
                     if not block:
@@ -49,13 +49,11 @@ def download(url: str, dest: Path, sha256: str, cap: int, timeout: int = 90) -> 
                         raise OcrError(f"The download passed the {cap} byte cap.")
                     digest.update(block)
                     handle.write(block)
-    except OcrError:
-        partial.unlink(missing_ok=True)
-        raise
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        partial.unlink(missing_ok=True)
-        raise OcrError(f"Could not download the file: {exc}") from exc
-    if digest.hexdigest() != sha256:
-        partial.unlink(missing_ok=True)
-        raise OcrError("The download did not match the pinned checksum.")
-    os.replace(partial, dest)
+        except OcrError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise OcrError(f"Could not download the file: {exc}") from exc
+        if digest.hexdigest() != sha256:
+            raise OcrError("The download did not match the pinned checksum.")
+
+    _replace_exclusive(dest, produce)

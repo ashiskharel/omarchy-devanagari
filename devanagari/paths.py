@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+import stat
+import tempfile
 from pathlib import Path
+
+from devanagari.errors import OcrError
 
 
 def _under(env: str, default: str, *parts: str) -> Path:
@@ -46,14 +50,50 @@ def samples_dir() -> Path:
 def ensure_private(directory: Path) -> None:
     """Create a cache directory only this user can search. An existing 0755 directory is tightened."""
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if not _is_real_directory(directory):
+        raise OcrError("The folder is not a real directory.")
     os.chmod(directory, 0o700)
 
 
 def write_private(path: Path, text: str) -> None:
     """Replace path with text that other local users cannot read."""
     ensure_private(path.parent)
-    partial = path.with_name(path.name + ".partial")
-    partial.write_text(text, encoding="utf-8")
-    os.chmod(partial, 0o600)
-    os.replace(partial, path)
+
+    def produce(handle) -> None:
+        handle.write(text.encode("utf-8"))
+
+    _replace_exclusive(path, produce)
+
+
+def _is_real_directory(directory: Path) -> bool:
+    try:
+        info = directory.lstat()
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode)
+
+
+def _replace_exclusive(path: Path, produce) -> None:
+    """Write through a new file in path's directory, then rename it over path.
+
+    The name is random and opened exclusively, so a symlink already sitting
+    at a predictable partial path is not followed. rename replaces a symlink
+    at path instead of writing through it.
+    """
+    if not _is_real_directory(path.parent):
+        raise OcrError("The folder is not a real directory.")
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    os.fchmod(fd, 0o600)
+    replaced = False
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            produce(handle)
+        os.replace(name, path)
+        replaced = True
+    finally:
+        if not replaced:
+            Path(name).unlink(missing_ok=True)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise OcrError("The file is not a regular file.")
     os.chmod(path, 0o600)
