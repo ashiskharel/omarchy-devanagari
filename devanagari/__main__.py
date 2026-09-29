@@ -38,11 +38,13 @@ def main(argv: list[str] | None = None) -> int:
     read.add_argument("path", type=Path)
     read.add_argument("--copy", action="store_true")
     read.add_argument("--json", action="store_true")
+    read.add_argument("--quiet", action="store_true", help="save the reading without printing it")
     read.add_argument("--psm", default="3")
 
     capture = sub.add_parser("capture", help="read a region of the screen")
     capture.add_argument("--geometry", help="box already chosen, as 'x,y wxh'")
     capture.add_argument("--json", action="store_true")
+    capture.add_argument("--quiet", action="store_true", help="save and copy the reading without printing it")
     capture.add_argument("--no-copy", action="store_true")
 
     evaluate_cmd = sub.add_parser("eval", help="score the sample pages")
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     last = sub.add_parser("last", help="print the last reading")
     last.add_argument("--copy", action="store_true")
     last.add_argument("--json", action="store_true")
+    last.add_argument("--quiet", action="store_true", help="copy the reading without printing it")
 
     args = parser.parse_args(argv)
     try:
@@ -78,13 +81,19 @@ def _run(args: argparse.Namespace) -> int:
         return _fetch(args.model, args.force)
     if args.command == "read":
         record = read_path(args.path, psm=args.psm)
-        return _emit(record, as_json=args.json, copy=args.copy, notify_user=False)
+        return _emit(record, as_json=args.json, copy=args.copy, notify_user=False, quiet=args.quiet)
     if args.command == "capture":
         record = read_geometry(args.geometry) if args.geometry else read_capture()
         if record is None:
             print("Selection cancelled.")
             return 0
-        return _emit(record, as_json=args.json, copy=not args.no_copy, notify_user=not args.no_copy)
+        return _emit(
+            record,
+            as_json=args.json,
+            copy=not args.no_copy,
+            notify_user=not args.no_copy,
+            quiet=args.quiet,
+        )
     if args.command == "eval":
         print(format_rows(evaluate(args.dir)))
         return 0
@@ -92,7 +101,7 @@ def _run(args: argparse.Namespace) -> int:
         record = load_last()
         if not record:
             raise OcrError("No reading yet.")
-        return _emit(record, as_json=args.json, copy=args.copy, notify_user=False)
+        return _emit(record, as_json=args.json, copy=args.copy, notify_user=False, quiet=args.quiet)
     return 2
 
 
@@ -114,16 +123,19 @@ def _fetch(model_id: str, force: bool) -> int:
     return 0
 
 
-def _emit(record: dict, *, as_json: bool, copy: bool, notify_user: bool) -> int:
+def _emit(record: dict, *, as_json: bool, copy: bool, notify_user: bool, quiet: bool = False) -> int:
     text = str(record.get("text") or "")
     if copy and text:
         copy_text(text)
     if notify_user and text:
-        notify("Copied Devanagari text", text.splitlines()[0][:80])
-    if as_json:
-        print(json.dumps(record, ensure_ascii=False))
-    else:
-        print(text)
+        # The headline and body are fixed strings. The recognized line stays
+        # out of the process arguments and out of the notification markup.
+        notify("Copied Devanagari text", "The line is on the clipboard.")
+    if not quiet:
+        if as_json:
+            print(json.dumps(record, ensure_ascii=False))
+        else:
+            print(text)
     return 0 if text else 1
 
 

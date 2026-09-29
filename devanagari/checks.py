@@ -61,6 +61,7 @@ def main() -> int:
     _assert_pdftotext_is_capped()
     _assert_capture_leaves_other_pickers()
     _assert_writes_do_not_follow_symlinks()
+    _assert_untrusted_text_is_plain()
 
     print("checks ok")
     return 0
@@ -272,6 +273,30 @@ def _assert_writes_do_not_follow_symlinks() -> None:
     assert not dest.is_symlink()
     assert dest.read_bytes() == body
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+
+
+def _assert_untrusted_text_is_plain() -> None:
+    root = Path(__file__).resolve().parents[1]
+    panel = (root / "Panel.qml").read_text()
+    bar = (root / "BarWidget.qml").read_text()
+    assert panel.count("Text {") == panel.count("textFormat: Text.PlainText")
+    assert panel.count("Text {") >= 9
+    assert "StdioCollector" not in panel
+    assert "Text.AutoText" not in panel
+    assert "Text.StyledText" not in panel
+    assert "Text.RichText" not in panel
+    assert '["capture", "--quiet"]' in panel
+    assert '["last", "--copy", "--quiet"]' in panel
+    assert "streamCap: 32000" in panel
+    assert bar.count("Text {") == 0
+    main = (root / "devanagari" / "__main__.py").read_text()
+    assert 'notify("Copied Devanagari text", "The line is on the clipboard.")' in main
+    assert "splitlines()[0]" not in main
+    source = (root / "devanagari" / "ocr.py").read_text()
+    image = source.split("def _read_image", 1)[1].split("\ndef ", 1)[0]
+    assert "_read_capped(" in image
+    assert "capture_output" not in image
+    assert "def _run(" not in source
 
 
 def _png_header(width: int, height: int) -> Path:

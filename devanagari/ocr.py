@@ -214,7 +214,8 @@ def _read_pdf(path: Path) -> str:
         stem = str(Path(folder) / "page")
         subprocess.run(
             ["pdftoppm", "-png", "-f", "1", "-l", "1", "-r", "150", str(path), stem],
-            capture_output=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             timeout=30,
             check=False,
         )
@@ -229,7 +230,7 @@ def _read_image(path: Path, psm: str) -> str:
     if path.stat().st_size > _IMAGE_CAP:
         raise OcrError("The image is larger than 15 MB.")
     _reject_huge_bitmap(path)
-    return _run(
+    return _read_capped(
         [
             "tesseract",
             str(path),
@@ -248,6 +249,7 @@ def _read_image(path: Path, psm: str) -> str:
             "preserve_interword_spaces=1",
         ],
         timeout=40,
+        limit=_TEXT_CAP,
     )
 
 
@@ -437,16 +439,6 @@ def _reap(proc: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=1)
-
-
-def _run(command: list[str], timeout: int) -> str:
-    try:
-        result = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
-    except FileNotFoundError as exc:
-        raise OcrError(f"{command[0]} is not installed.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise OcrError(f"{command[0]} took too long.") from exc
-    return result.stdout.decode("utf-8", "replace")
 
 
 def _require_tessdata() -> None:

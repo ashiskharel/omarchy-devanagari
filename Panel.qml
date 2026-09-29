@@ -92,6 +92,8 @@ Panel {
     root.mode = args[0]
     root.busy = true
     root.status = ""
+    root.toolOut = ""
+    root.toolErr = ""
     tool.command = [root.toolPath()].concat(args)
     tool.running = true
   }
@@ -119,6 +121,27 @@ Panel {
     return ""
   }
 
+  // Status JSON is a few thousand characters. Anything past this is dropped
+  // and the command is stopped, so the shell cannot hold an unbounded stream.
+  readonly property int streamCap: 32000
+  property string toolOut: ""
+  property string toolErr: ""
+
+  function appendStream(which, chunk) {
+    var current = which === "out" ? root.toolOut : root.toolErr
+    if (current.length >= root.streamCap) {
+      if (tool.running) tool.running = false
+      return
+    }
+    var piece = (current === "" ? "" : "\n") + String(chunk || "")
+    if (current.length + piece.length > root.streamCap) {
+      piece = piece.slice(0, root.streamCap - current.length)
+      if (tool.running) tool.running = false
+    }
+    if (which === "out") root.toolOut += piece
+    else root.toolErr += piece
+  }
+
   Timer {
     id: captureDelay
     interval: 40
@@ -128,10 +151,10 @@ Panel {
       spins += 1
       if (!panel.open && !panel.visible) {
         stop()
-        root.run(["capture", "--json"])
+        root.run(["capture", "--quiet"])
       } else if (spins > 40) {
         stop()
-        root.run(["capture", "--json"])
+        root.run(["capture", "--quiet"])
       }
     }
   }
@@ -140,25 +163,22 @@ Panel {
 
   Process {
     id: tool
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (root.mode === "status") root.applyStatus(text || "")
-      }
+    stdout: SplitParser {
+      onRead: function(line) { root.appendStream("out", line) }
     }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var err = String(text || "").trim()
-        if (err !== "") root.status = err
-      }
+    stderr: SplitParser {
+      onRead: function(line) { root.appendStream("err", line) }
     }
     onExited: function(code) {
       root.busy = false
+      var err = String(root.toolErr || "").trim()
       if (root.mode === "status") {
-        if (code !== 0 && root.status === "") root.status = "Machine check failed"
+        if (String(root.toolOut || "").trim() !== "") root.applyStatus(root.toolOut)
+        if (err !== "") root.status = err
+        else if (code !== 0 && root.status === "") root.status = "Machine check failed"
         return
       }
+      if (err !== "") root.status = err
       var reopen = root.reopenAfterCapture
       root.reopenAfterCapture = false
       var failed = code !== 0 && root.status === ""
@@ -216,6 +236,7 @@ Panel {
             spacing: 2
 
             Text {
+              textFormat: Text.PlainText
               text: "Devanagari"
               color: root.ink
               font.family: root.face
@@ -223,6 +244,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               wrapMode: Text.WordWrap
               text: root.report && root.report.line ? root.report.line : (root.busy ? "Checking this machine…" : "No machine check yet")
@@ -247,6 +269,7 @@ Panel {
                 spacing: 2
 
                 Text {
+                  textFormat: Text.PlainText
                   text: modelData.name || ""
                   color: root.ink
                   font.family: root.face
@@ -256,6 +279,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   wrapMode: Text.WordWrap
                   text: modelData.detail || ""
@@ -266,6 +290,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   visible: modelData.action === "fetch" || modelData.action === "download"
                   text: modelData.action === "fetch" ? "Fetch Nepali data" : "Download weights"
                   color: root.ink
@@ -292,6 +317,7 @@ Panel {
             spacing: Style.space(16)
 
             Text {
+              textFormat: Text.PlainText
               text: root.busy && root.mode === "capture" ? "Selecting…" : "Capture"
               color: root.ink
               font.family: root.face
@@ -307,6 +333,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: "Copy"
               color: root.ink
               opacity: (root.lastReading.text || "") !== "" ? 1 : 0.35
@@ -318,7 +345,7 @@ Panel {
                 anchors.fill: parent
                 enabled: !root.busy && (root.lastReading.text || "") !== ""
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: root.run(["last", "--copy"])
+                onClicked: root.run(["last", "--copy", "--quiet"])
               }
             }
           }
@@ -330,6 +357,7 @@ Panel {
             visible: root.lastLine() !== ""
 
             Text {
+              textFormat: Text.PlainText
               text: root.lastLine()
               width: parent.width
               wrapMode: Text.WordWrap
@@ -342,6 +370,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             x: Style.space(4)
             width: parent.width - Style.space(8)
             wrapMode: Text.WordWrap
